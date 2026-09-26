@@ -1,12 +1,12 @@
 """TODO: script CLI que encadena contratos, preprocesado e inferencia."""
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-from .contracts import WineQualityRequest, WineQualityPrediction
+from .contracts import WineQualityPrediction, WineQualityRequest
 from .inference import (
     DEFAULT_MODEL_PATH,
     infer_wine_quality,
@@ -15,26 +15,26 @@ from .inference import (
 from .preprocess import PREPROCESSING_VERSION, preprocess_wine_request
 
 
-def predict_file(input_path: Path, output_path: Path, model_path: Path,) -> int:
+def predict_file(
+    input_path: Path,
+    output_path: Path,
+    model_path: Path,
+) -> int:
     model = load_wine_quality_model(model_path)
     predictions: list[dict[str, str | float]] = []
 
     df = pd.read_csv(input_path)
 
-    for idx, row in df.iterrows():
+    for _idx, row in df.iterrows():
         sample_id = row["sample_id"]
 
         if pd.isna(sample_id) or str(sample_id).strip() == "":
             raise ValueError("sample_id no puede estar vacío.")
 
         try:
-            request = WineQualityRequest.model_validate(
-                row.drop("sample_id").to_dict()
-            )
+            request = WineQualityRequest.model_validate(row.drop("sample_id").to_dict())
         except ValueError as error:
-            raise ValueError(
-                f"Error en sample_id={sample_id}: {error}"
-            ) from error
+            raise ValueError(f"Error en sample_id={sample_id}: {error}") from error
 
         features = preprocess_wine_request(request)
 

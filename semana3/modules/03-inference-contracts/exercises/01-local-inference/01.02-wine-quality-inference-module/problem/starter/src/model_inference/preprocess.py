@@ -1,3 +1,5 @@
+from .contracts import WineQualityRequest
+
 """TODO: transformación de una muestra validada en el vector del modelo."""
 
 # Este contrato se entrega ya decidido: no cambies ni los nombres ni el orden.
@@ -18,11 +20,10 @@ FEATURE_NAMES = (
 # Implementa WineFeatures y preprocess_wine_request(). El orden anterior debe
 # coincidir con el artefacto, no con un orden arbitrario del CSV.
 
-from .contracts import WineQualityRequest
-
 PREPROCESSING_VERSION = "wine-red-features-v1"
 
-class WineFeatures():
+
+class WineFeatures:
     def __init__(self, request: WineQualityRequest):
         self.fixed_acidity = request.fixed_acidity
         self.volatile_acidity = request.volatile_acidity
@@ -48,8 +49,10 @@ class WineFeatures():
             self.density,
             self.ph,
             self.sulphates,
-            self.alcohol
+            self.alcohol,
         ]
 
+
 def preprocess_wine_request(request: WineQualityRequest) -> WineFeatures:
+
     return WineFeatures(request)

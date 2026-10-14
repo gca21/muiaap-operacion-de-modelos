@@ -11,7 +11,7 @@ import joblib
 
 from .preprocess import FEATURE_NAMES, WineFeatures
 
-relative_path = "models/wine_quality_classifier 3.joblib"
+relative_path = "models/wine_quality_classifier.joblib"
 DEFAULT_MODEL_PATH = (
     pathlib.Path(__file__).parent.parent.parent.joinpath(relative_path).resolve()
 )

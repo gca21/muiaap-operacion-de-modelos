@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+import joblib
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from model_packaging.contracts import (
     QualityBand,
     WineQualityPrediction,
     WineQualityRequest,
 )
-
-from model_packaging.preprocess import PREPROCESSING_VERSION, FEATURE_NAMES
-import json
-import joblib
+from model_packaging.preprocess import (
+    FEATURE_NAMES,
+    PREPROCESSING_VERSION,
+    preprocess_wine_request,
+)
 
 ARTIFACT_SCHEMA_VERSION = "wine-quality-bundle-v1"
 DEFAULT_BUNDLE_PATH = Path("models/wine_quality_bundle")
@@ -56,21 +58,27 @@ class ArtifactManifest(BaseModel):
     @classmethod
     def validate_schema_version(cls, value: str) -> str:
         if value != ARTIFACT_SCHEMA_VERSION:
-            raise ValueError(f"schema_version incompatible, valor esperado: {ARTIFACT_SCHEMA_VERSION}")
+            raise ValueError(
+                f"schema_version incompatible, "
+                f"valor esperado: {ARTIFACT_SCHEMA_VERSION}"
+            )
         return value
 
     @field_validator("model_version")
     @classmethod
     def validate_model_version(cls, value: str) -> str:
         if len(value.strip()) == 0:
-            raise ValueError(f"La versión del modelo debe contener algún valor")
+            raise ValueError("La versión del modelo debe contener algún valor")
         return value
 
     @field_validator("preprocessing_version")
     @classmethod
     def validate_preprocessing_version(cls, value: str) -> str:
         if value != PREPROCESSING_VERSION:
-            raise ValueError(f"preprocessing_version incompatible, valor esperado: {PREPROCESSING_VERSION}")
+            raise ValueError(
+                f"preprocessing_version incompatible, "
+                f"valor esperado: {PREPROCESSING_VERSION}"
+            )
         return value
 
     @field_validator("feature_names")
@@ -82,9 +90,12 @@ class ArtifactManifest(BaseModel):
 
     @field_validator("output_labels")
     @classmethod
-    def validate_output_labels(cls, value: tuple[QualityBand, ...]) -> tuple[QualityBand, ...]:
+    def validate_output_labels(
+        cls, value: tuple[QualityBand, ...]
+    ) -> tuple[QualityBand, ...]:
         if value != OUTPUT_LABELS:
-            raise ValueError(f"output_labels no coincide con el contrato")
+            raise ValueError("output_labels no coincide con el contrato")
+        return value
 
 
 @dataclass(frozen=True)
@@ -104,7 +115,7 @@ def create_manifest(
         preprocessing_version=PREPROCESSING_VERSION,
         feature_names=FEATURE_NAMES,
         output_labels=OUTPUT_LABELS,
-        estimator_type=type(estimator).__name__
+        estimator_type=type(estimator).__name__,
     )
 
 
@@ -119,24 +130,60 @@ def save_model_bundle(
         raise ValueError("El manifest no debe estar vacío")
 
     bundle_path.mkdir(parents=True, exist_ok=True)
-    with open(bundle_path / "manifest.json", "w") as f:
+    with open(bundle_path / MANIFEST_FILENAME, "w") as f:
         f.write(manifest.model_dump_json(indent=4))
 
-    joblib.dump(estimator, bundle_path / "model.joblib")
+    joblib.dump({"estimator": estimator}, bundle_path / MODEL_FILENAME)
 
     return manifest
 
 
 def load_model_bundle(bundle_path: Path) -> LoadedModelBundle:
-    """TODO: valida el manifiesto antes de cargar el estimador."""
+    """valida el manifiesto antes de cargar el estimador."""
 
-    raise NotImplementedError("Implementa load_model_bundle().")
+    manifest_path = bundle_path / MANIFEST_FILENAME
+    model_path = bundle_path / MODEL_FILENAME
+    if not manifest_path.is_file() or not model_path.is_file():
+        raise FileNotFoundError(
+            f"El bundle debe contener {MANIFEST_FILENAME} y {MODEL_FILENAME}: "
+            f"{bundle_path}"
+        )
+
+    try:
+        manifest = ArtifactManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError) as error:
+        raise ValueError(f"manifest.json inválido: {error}") from error
+
+    payload = joblib.load(model_path)
+    if not isinstance(payload, Mapping):
+        raise ValueError("model.joblib debe contener un mapa con estimator.")
+    estimator = payload.get("estimator")
+    return LoadedModelBundle(
+        estimator=estimator,
+        manifest=manifest,
+    )
 
 
 def infer_wine_quality(
     bundle: LoadedModelBundle,
     request: WineQualityRequest,
 ) -> WineQualityPrediction:
-    """TODO: preprocesa, invoca el estimador y valida la respuesta."""
+    """preprocesa, invoca el estimador y valida la respuesta."""
+    features = preprocess_wine_request(request)
+    rows = [features.as_vector()]
 
-    raise NotImplementedError("Implementa infer_wine_quality().")
+    predicted_labels = bundle.estimator.predict(rows)
+    probabilities = bundle.estimator.predict_proba(rows)
+    probability_row = probabilities[0]
+
+    try:
+        return WineQualityPrediction(
+            quality_band=str(predicted_labels[0]),
+            confidence=max(probability_row),
+            model_version=bundle.manifest.model_version,
+            preprocessing_version=bundle.manifest.preprocessing_version,
+        )
+    except (ValidationError, ValueError) as e:
+        raise ValueError(f"La salida del modelo no cumple el contrato: {e}") from e

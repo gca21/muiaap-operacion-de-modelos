@@ -5,7 +5,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from model_packaging.artifact import DEFAULT_BUNDLE_PATH
+import pandas as pd
+
+from model_packaging.artifact import (
+    DEFAULT_BUNDLE_PATH,
+    infer_wine_quality,
+    load_model_bundle,
+)
+from model_packaging.contracts import WineQualityRequest
 
 
 def predict_file(
@@ -13,9 +20,22 @@ def predict_file(
     output_path: Path,
     bundle_path: Path,
 ) -> int:
-    """TODO: valida todas las filas y escribe el CSV solo al final."""
+    """valida todas las filas y escribe el CSV solo al final."""
+    bundle = load_model_bundle(bundle_path)
+    df = pd.read_csv(input_path)
 
-    raise NotImplementedError("Implementa predict_file().")
+    predictions: list[dict[str, str | float]] = []
+    for index, row in df.iterrows():
+        sample_id = row.get("sample_id", "")
+        if not sample_id:
+            raise ValueError(f"Fila {index} tiene un sample_id vacío.")
+
+        request = WineQualityRequest.model_validate(row.drop("sample_id").to_dict())
+        prediction = infer_wine_quality(bundle, request)
+        predictions.append({"sample_id": sample_id, **prediction.model_dump()})
+
+    pd.DataFrame(predictions).to_csv(output_path, index=False)
+    return len(predictions)
 
 
 def parse_args() -> argparse.Namespace:

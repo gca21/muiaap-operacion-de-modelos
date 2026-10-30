@@ -4,7 +4,7 @@ Punto de partida: la API de S8 valida la entrada, pero la salida todavía es un
 `dict` sin contrato. En S9 la respuesta también pasa a ser un contrato.
 """
 
-from datetime import UTC, datetime  # noqa: F401 - pista para el TODO S9.1c
+from datetime import UTC, datetime, timezone  # noqa: F401 - pista para el S9.1c
 from enum import StrEnum
 from typing import Literal
 
@@ -35,20 +35,20 @@ class WineFeatures(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    # TODO S9.3d: añade `description=` a cada Field (unidad incluida, p. ej.
+    # S9.3d: añade `description=` a cada Field (unidad incluida, p. ej.
     # "Alcohol (% vol.)."). Swagger la muestra junto al rango; el test
     # `test_feature_fields_are_described` comprueba los once campos.
-    fixed_acidity: float = Field(ge=0, le=20)
-    volatile_acidity: float = Field(ge=0, le=2)
-    citric_acid: float = Field(ge=0, le=2)
-    residual_sugar: float = Field(ge=0, le=20)
-    chlorides: float = Field(ge=0, le=1)
-    free_sulfur_dioxide: float = Field(ge=0, le=100)
-    total_sulfur_dioxide: float = Field(ge=0, le=300)
-    density: float = Field(ge=0.98, le=1.01)
-    ph: float = Field(ge=2.5, le=4.5)
-    sulphates: float = Field(ge=0, le=3)
-    alcohol: float = Field(ge=5, le=20)
+    fixed_acidity: float = Field(ge=0, le=20, description="Minimum 0 and maximum 20 in g/dm3")
+    volatile_acidity: float = Field(ge=0, le=2, description="Minimum 0 and maximum 2 in g/dm3")
+    citric_acid: float = Field(ge=0, le=2, description="Minimum 0 and maximum 2 in g/dm3")
+    residual_sugar: float = Field(ge=0, le=20, description="Minimum 0 and maximum 20 in g/dm3")
+    chlorides: float = Field(ge=0, le=1, description="Minimum 0 and maximum 1 in g/dm3")
+    free_sulfur_dioxide: float = Field(ge=0, le=100, description="Minimum 0 and maximum 100 in mg/dm3")
+    total_sulfur_dioxide: float = Field(ge=0, le=300, description="Minimum 0 and maximum 300 in mg/dm3")
+    density: float = Field(ge=0.98, le=1.01, description="Minimum 0.98 and maximum 1.01 in g/cm3")
+    ph: float = Field(ge=2.5, le=4.5, description="Minimum 2.5 and maximum 4.5")
+    sulphates: float = Field(ge=0, le=3, description="Minimum 0 and maximum 3 in g/dm3")
+    alcohol: float = Field(ge=5, le=20, description="Minimum 5 and maximum 20 in %vol")
 
 
 class PredictionRequest(BaseModel):
@@ -70,23 +70,42 @@ class QualityBand(StrEnum):
 class Prediction(BaseModel):
     """Predicción pública: no incluye puntuaciones internas del modelo."""
 
-    # TODO S9.1a: declara los cuatro campos públicos del contrato de S7:
+    # S9.1a: declara los cuatro campos públicos del contrato de S7:
     # `quality_band` (usa QualityBand, no `str`), `confidence` (entre 0 y 1),
     # `model_version` y `preprocessing_version`. Lo que no declares aquí no
     # saldrá en la respuesta: así se filtra `raw_score`.
-    # TODO S9.1b: el modelo devuelve la confianza con todos sus decimales; el
+    # S9.1b: el modelo devuelve la confianza con todos sus decimales; el
     # contrato público la expone con dos. Investiga `@field_serializer` de
     # Pydantic v2: la decisión pertenece al contrato, no al predictor.
     # Comprobación: tests/test_s9_1_output_contract.py
+
+    quality_band: QualityBand
+    confidence: float = Field(ge=0, le=1, description="Confidence of the given prediction")
+    model_version: str = Field(min_length=1)
+    preprocessing_version: str = Field(min_length=1)
+
+    @field_serializer("confidence")
+    def round_confidence(self, value: float):
+        return round(value, 2)
 
 
 class PredictionResponse(BaseModel):
     """Respuesta de `POST /v1/predictions`."""
 
-    # TODO S9.1c: declara `prediction: Prediction`, `request_id: str` y un campo
+    # S9.1c: declara `prediction: Prediction`, `request_id: str` y un campo
     # nuevo `served_at: datetime`. Serialízalo en UTC, ISO 8601 y con sufijo
     # `Z` (por ejemplo `2026-10-20T09:15:00.123Z`). Añadir un campo es un
     # cambio compatible: ¿qué parte de la versión de la API debes subir?
+    ''' Si el campo es obligatorio, sería versión major, si es un campo opcional sería versión minor'''
+
+    prediction: Prediction
+    request_id: str = Field(min_length=1)
+    served_at: datetime
+
+    @field_serializer("served_at")
+    def served_to_utc(self, value: datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
 
 
 class HealthResponse(BaseModel):

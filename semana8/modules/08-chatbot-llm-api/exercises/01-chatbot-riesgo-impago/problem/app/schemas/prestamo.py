@@ -12,7 +12,7 @@ class PrestamoEntrada(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edad: int = Field(ge=18, le=75)
-    ingresos_mensuales: float = Field(ge=0)
+    ingresos_mensuales: float = Field(ge=1)
     importe_prestamo: float = Field(ge=0)
     plazo_meses: int = Field(ge=6, le=84)
     antiguedad_laboral_anios: int = Field(ge=0, le=50)
@@ -33,4 +33,4 @@ class PrediccionSalida(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     probabilidad_impago: float = Field(ge=0, le=1)
-    decision: str = Literal["aprobar", "revisar", "rechazar"]
+    decision: Literal["aprobar", "revisar", "rechazar"]

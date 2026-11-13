@@ -2,7 +2,7 @@ import json
 
 from pydantic import ValidationError
 
-from app.schemas.chat import ChatSalida, HerramientaUsada, ChatEntrada
+from app.schemas.chat import ChatSalida, HerramientaUsada, Mensaje
 from app.schemas.prestamo import PrestamoEntrada, PrediccionSalida
 from app.services.modelo import predecir
 
@@ -30,7 +30,7 @@ def leer_argumentos(texto):
 # definir_tool() -> dict con la definicion de la tool, sacando "parameters" de PrestamoEntrada
 # ejecutar_tool(nombre, argumentos_json) -> dict con "ok" True/False
 #       (tool desconocida, JSON roto, datos invalidos o campos inventados -> ok False con el error)
-# TODO: responder(mensajes, llm) -> ChatSalida, con el bucle LLM -> tool -> LLM (maximo MAX_VUELTAS)
+# responder(mensajes, llm) -> ChatSalida, con el bucle LLM -> tool -> LLM (maximo MAX_VUELTAS)
 
 def definir_tool() -> dict:
     return {
@@ -43,16 +43,16 @@ def definir_tool() -> dict:
     }
 
 def ejecutar_tool(nombre, argumentos_json) -> dict:
+    if nombre != NOMBRE_TOOL:
+        return {"ok": False, "error": f"Tool desconocida: {nombre}"}
+
     argumentos: PrestamoEntrada
     try:
         argumentos = PrestamoEntrada.model_validate(leer_argumentos(argumentos_json))
-    except (ValidationError) as e:
-        return {"ok": False, "error": e}
+    except ValidationError as e:
+        return {"ok": False, "error": str(e)}
 
-    if nombre != NOMBRE_TOOL:
-        return {"ok": False, "error": "Nombre de tool incorrecto"}
-
-    prediccion: PrediccionSalida= predecir(argumentos)
+    prediccion: PrediccionSalida = predecir(argumentos)
 
     return {
         "ok": True,
@@ -61,5 +61,45 @@ def ejecutar_tool(nombre, argumentos_json) -> dict:
     }
 
 
-def responder(mensajes: ChatEntrada, llm) -> ChatSalida:
-    pass
+def responder(mensajes: list[Mensaje], llm) -> ChatSalida:
+    historial = [{"role": "system", "content": SISTEMA}]
+    historial.extend(
+        {"role": mensaje.role, "content": mensaje.content} for mensaje in mensajes
+    )
+    herramienta_usada = None
+
+    for _ in range(MAX_VUELTAS):
+        respuesta_llm = llm.completar(historial, [definir_tool()])
+        historial.append(respuesta_llm)
+        llamadas = respuesta_llm.get("tool_calls", [])
+
+        if not llamadas:
+            return ChatSalida(
+                respuesta=respuesta_llm.get("content") or "",
+                herramienta=herramienta_usada,
+            )
+
+        for llamada in llamadas:
+            funcion = llamada["function"]
+            nombre = funcion["name"]
+            argumentos_json = funcion.get("arguments", "")
+            argumentos = leer_argumentos(argumentos_json)
+            resultado = ejecutar_tool(nombre, argumentos_json)
+            herramienta_usada = HerramientaUsada(
+                nombre=nombre,
+                argumentos=argumentos,
+                resultado=resultado,
+            )
+            historial.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": llamada["id"],
+                    "name": nombre,
+                    "content": json.dumps(resultado),
+                }
+            )
+
+    return ChatSalida(
+        respuesta="No se pudo completar la solicitud dentro del límite de intentos.",
+        herramienta=herramienta_usada,
+    )

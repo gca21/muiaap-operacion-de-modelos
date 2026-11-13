@@ -21,14 +21,9 @@ Scope = Literal["predict", "admin"]
 class ClientConfig(BaseModel):
     """Credencial, permisos y cuota de un cliente de la API."""
 
-    # TODO S10.1a: declara los tres campos de un cliente:
-    # - `key`: la API key. ¿Qué tipo de Pydantic evita que aparezca en un
-    #   `repr`, en un `print` o en un log? Investiga `SecretStr` y cómo se lee
-    #   su valor cuando de verdad lo necesitas.
-    # - `scopes`: lista de `Scope`; un scope desconocido debe fallar al arrancar.
-    # - `rate_limit_per_minute`: entero estrictamente positivo, 60 por defecto
-    #   (`Field` con una restricción numérica).
-    # Comprobación: tests/test_s10_1_settings.py (repr y configuración inválida).
+    key: SecretStr
+    scopes: list[Scope]
+    rate_limit_per_minute: int = Field(default=60, gt=0)
 
 
 class Settings(BaseSettings):
@@ -39,16 +34,13 @@ class Settings(BaseSettings):
     )
 
     mode: Literal["ready", "unavailable"] = "ready"
+    clients: dict[str, ClientConfig] = Field(default_factory=dict)
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8501"])
+    docs_enabled: bool = True
 
-    # TODO S10.1b: añade el resto de la configuración con valores por defecto
-    # SEGUROS (la API debe arrancar sin `.env`, pero sin abrir nada):
-    # - `clients`: diccionario nombre -> ClientConfig, vacío por defecto. Sin
-    #   clientes no hay claves válidas: es la decisión «fail closed».
-    # - `cors_origins`: lista de orígenes; por defecto solo el front de
-    #   Streamlit (`http://localhost:8501`).
-    # - `docs_enabled`: booleano, activado por defecto.
-    # Además, rechaza `"*"` en `cors_origins` con un `field_validator`: la
-    # configuración debe obligar a listar los orígenes.
-    # ¿Por qué un error de configuración debe impedir arrancar en lugar de
-    # aparecer en la primera petición?
-    # Comprobación: uv run pytest -q tests/test_s10_1_settings.py
+    @field_validator("cors_origins")
+    @classmethod
+    def reject_wildcard_cors_origin(cls, origins: list[str]) -> list[str]:
+        if "*" in origins:
+            raise ValueError("CORS origins must be listed explicitly")
+        return origins
